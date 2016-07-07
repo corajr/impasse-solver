@@ -6,6 +6,7 @@ import qualified Data.Set as Set
 import Data.List (groupBy, sortBy, find)
 import Data.Ord (comparing)
 import Control.Monad (guard)
+import Control.Arrow (second)
 
 data Piece = Player
            | Stationary
@@ -30,15 +31,24 @@ data Direction = MoveUp
                | MoveRight
                deriving (Eq, Show)
 
-type Board = Array (Int, Int) (Set Piece)
+newtype Board = Board { unBoard :: Array (Int, Int) (Set Piece) }
+  deriving (Eq)
+
+instance Show Board where
+  show = showBoard
+
+type PiecesInPosition = ((Int, Int), Set Piece)
+
+buildBoard :: [PiecesInPosition] -> Board
+buildBoard = Board . accumArray Set.union Set.empty ((1,1), (10, 3))
 
 defaultBoard :: Board
-defaultBoard = accumArray Set.union Set.empty ((1,1), (10, 3)) [ ((1, 2), Set.singleton Player)
-                                                               , ((10, 2), Set.singleton Goal)
-                                                               ]
+defaultBoard = buildBoard [ ((1, 2), Set.singleton Player)
+                          , ((10, 2), Set.singleton Goal)
+                          ]
 
 showBoard :: Board -> String
-showBoard board = unlines rows'
+showBoard (Board board) = unlines $ "":rows'
   where items = assocs board
         rows = groupBy (\a b -> comparing (snd . fst) a b == EQ) . sortBy (comparing (snd . fst)) $ items
         rows' = map (concatMap (showPosition . snd)) rows
@@ -48,7 +58,7 @@ showBoard board = unlines rows'
             Nothing -> " "
 
 findPlayer :: Board -> Maybe (Int, Int)
-findPlayer = fmap fst . find ((== [Player]) . Set.toList . snd) . assocs
+findPlayer = fmap fst . find ((== [Player]) . Set.toList . snd) . assocs . unBoard
 
 calcNewPosition :: Direction -> (Int, Int) -> (Int, Int)
 calcNewPosition dir (x, y) = (x + offsetX, ((y - 1 + offsetY) `mod` 3) + 1)
@@ -68,14 +78,28 @@ checkValid = all f . Set.toList
                     _ -> True
 
 stepPieces :: Board -> Board
-stepPieces = id
+stepPieces (Board board) = board'
+  where board' = buildBoard assocs'
+        assocs' = concatMap stepPiecesInPosition (assocs board)
+
+stepPiecesInPosition :: PiecesInPosition -> [PiecesInPosition]
+stepPiecesInPosition (position, pieces) = map (second Set.singleton . (\x -> stepSinglePiece (position, x))) $ Set.toList pieces
+
+stepSinglePiece :: ((Int, Int), Piece) -> ((Int, Int), Piece)
+stepSinglePiece (position, piece) =
+  case piece of
+    UpArrow -> (calcNewPosition MoveUp position, piece)
+    DownArrow -> (calcNewPosition MoveDown position, piece)
+    Minus True -> (position, Minus False)
+    Minus False -> (position, Minus True)
+    _ -> (position, piece)
 
 step :: Direction -> Board -> Maybe Board
 step dir board = do
   player <- findPlayer board
   let newPosition@(x, _) = calcNewPosition dir player
   guard $ x >= 1 && x <= 10
-  let board' = if dir == MoveUp || dir == MoveDown then stepPieces board else board
+  let (Board board') = if dir == MoveUp || dir == MoveDown then stepPieces board else board
       piecesAtNewPosition = board' ! newPosition
   guard $ checkValid piecesAtNewPosition
-  return $ board' // [(player, Set.delete Player (board' ! player)), (newPosition, Set.insert Player piecesAtNewPosition)]
+  return . Board $ board' // [(player, Set.delete Player (board' ! player)), (newPosition, Set.insert Player piecesAtNewPosition)]
