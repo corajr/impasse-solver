@@ -9,8 +9,7 @@ import Control.Arrow (first)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Array (bounds, (//), elems)
-
-import Debug.Trace (traceShowId)
+import Data.Maybe (isJust)
 
 newtype Position = Position { unPosition :: (Int, Int) }
   deriving (Eq, Show)
@@ -115,3 +114,7 @@ spec = do
   describe "solve" $ do
     it "solves the default board with just the player and the goal" $
       solve defaultBoard `shouldBe` Just (replicate 9 MoveRight)
+    it "solves a board with the player, the goal, and a stationary obstacle" $
+      solve (defaultBoardWith [((2,2), Set.singleton Stationary)]) `shouldSatisfy` isJust
+    it "solves a board with the player, the goal, and a moving obstacle" $
+      solve (defaultBoardWith [((2,1), Set.singleton DownArrow)]) `shouldSatisfy` isJust
