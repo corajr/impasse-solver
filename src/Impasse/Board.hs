@@ -123,4 +123,4 @@ tryProposedSolution board = maybe False isSolved . foldM f board
 -- | Takes in a starting 'Board' and returns a list of 'Direction's if it can be solved. Otherwise return Nothing.
 solve :: Board -> Maybe [Direction]
 solve board = if tryProposedSolution board proposal then Just proposal else Nothing
-  where proposal = replicate 10 MoveRight
+  where proposal = replicate 9 MoveRight

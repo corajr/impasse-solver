@@ -114,4 +114,4 @@ spec = do
                 in isSolved board === playerAndGoalTogether
   describe "solve" $ do
     it "solves the default board with just the player and the goal" $
-      solve defaultBoard `shouldBe` Just (replicate 10 MoveRight)
+      solve defaultBoard `shouldBe` Just (replicate 9 MoveRight)
