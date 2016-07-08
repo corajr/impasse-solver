@@ -5,7 +5,9 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.List (groupBy, sortBy, find)
 import Data.Ord (comparing)
-import Control.Monad (guard)
+import Data.Maybe (fromMaybe)
+import Debug.Trace (traceShowId)
+import Control.Monad (guard, foldM)
 import Control.Arrow (second)
 
 data Piece = Player
@@ -40,7 +42,10 @@ instance Show Board where
 type PiecesInPosition = ((Int, Int), Set Piece)
 
 buildBoard :: [PiecesInPosition] -> Board
-buildBoard = Board . accumArray Set.union Set.empty ((1,1), (10, 3))
+buildBoard = Board . accum Set.union (array b [(i, z) | i <- range b])
+  where b = ((1,1), (10,3))
+        z = Set.empty
+-- accumArray Set.union Set.empty ((1,1), (10, 3))
 
 defaultBoard :: Board
 defaultBoard = buildBoard [ ((1, 2), Set.singleton Player)
@@ -58,7 +63,7 @@ showBoard (Board board) = unlines $ "":rows'
             Nothing -> " "
 
 findPlayer :: Board -> Maybe (Int, Int)
-findPlayer = fmap fst . find ((== [Player]) . Set.toList . snd) . assocs . unBoard
+findPlayer = fmap fst . find (Set.member Player . snd) . assocs . unBoard
 
 calcNewPosition :: Direction -> (Int, Int) -> (Int, Int)
 calcNewPosition dir (x, y) = (x + offsetX, ((y - 1 + offsetY) `mod` 3) + 1)
@@ -103,3 +108,19 @@ step dir board = do
       piecesAtNewPosition = board' ! newPosition
   guard $ checkValid piecesAtNewPosition
   return . Board $ board' // [(player, Set.delete Player (board' ! player)), (newPosition, Set.insert Player piecesAtNewPosition)]
+
+-- | Are the player and the goal in the same place?
+isSolved :: Board -> Bool
+isSolved board = fromMaybe False $ do
+  player <- findPlayer board
+  let piecesAtPlace = unBoard board ! player
+  return $ Goal `Set.member` piecesAtPlace
+
+tryProposedSolution :: Board -> [Direction] -> Bool
+tryProposedSolution board = maybe False isSolved . foldM f board
+  where f acc x = step x acc -- (traceShowId acc)
+
+-- | Takes in a starting 'Board' and returns a list of 'Direction's if it can be solved. Otherwise return Nothing.
+solve :: Board -> Maybe [Direction]
+solve board = if tryProposedSolution board proposal then Just proposal else Nothing
+  where proposal = replicate 10 MoveRight
