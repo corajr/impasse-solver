@@ -21,6 +21,8 @@ data Piece = Player
            | Stationary
            | UpArrow
            | DownArrow
+           | UpHorizontal
+           | DownHorizontal
            | Minus Bool
            | Goal
            deriving (Eq, Show, Ord)
@@ -46,6 +48,8 @@ showPiece Player = "+"
 showPiece Stationary = "o"
 showPiece UpArrow = "^"
 showPiece DownArrow = "v"
+showPiece UpHorizontal = "`"
+showPiece DownHorizontal = "."
 showPiece (Minus False) = "0"
 showPiece (Minus True) = "-"
 showPiece Goal = "X"
@@ -55,6 +59,8 @@ readPiece '+' = Player
 readPiece 'o' = Stationary
 readPiece '^' = UpArrow
 readPiece 'v' = DownArrow
+readPiece '`' = UpHorizontal
+readPiece '.' = DownHorizontal
 readPiece '0' = Minus False
 readPiece '-' = Minus True
 readPiece 'X' = Goal
@@ -106,32 +112,42 @@ checkValid = all f . Set.toList
                     Stationary -> False
                     UpArrow -> False
                     DownArrow -> False
+                    UpHorizontal -> False
+                    DownHorizontal -> False
                     Minus True -> False
                     _ -> True
 
-stepPieces :: Board -> Board
-stepPieces (Board board) = board'
+stepPieces :: Direction -> Board -> Board
+stepPieces dir (Board board) = board'
   where board' = buildBoard assocs'
-        assocs' = concatMap stepPiecesInPosition (assocs board)
+        assocs' = concatMap (stepPiecesInPosition dir) (assocs board)
 
-stepPiecesInPosition :: PiecesInPosition -> [PiecesInPosition]
-stepPiecesInPosition (position, pieces) = map (second Set.singleton . (\x -> stepSinglePiece (position, x))) $ Set.toList pieces
+stepPiecesInPosition :: Direction -> PiecesInPosition -> [PiecesInPosition]
+stepPiecesInPosition dir (position, pieces) = map (second Set.singleton . (\x -> stepSinglePiece dir (position, x))) $ Set.toList pieces
 
-stepSinglePiece :: ((Int, Int), Piece) -> ((Int, Int), Piece)
-stepSinglePiece (position, piece) =
+horizontal :: Direction -> Bool
+horizontal MoveLeft = True
+horizontal MoveRight = True
+horizontal _ = False
+
+stepSinglePiece :: Direction -> ((Int, Int), Piece) -> ((Int, Int), Piece)
+stepSinglePiece dir (position, piece) =
   case piece of
-    UpArrow -> (calcNewPosition MoveUp position, piece)
-    DownArrow -> (calcNewPosition MoveDown position, piece)
-    Minus True -> (position, Minus False)
-    Minus False -> (position, Minus True)
+    UpArrow -> if horizontal' then (position, piece) else (calcNewPosition MoveUp position, piece)
+    DownArrow -> if horizontal' then (position, piece) else (calcNewPosition MoveDown position, piece)
+    UpHorizontal -> if horizontal' then (calcNewPosition MoveUp position, piece) else (position, piece)
+    DownHorizontal -> if horizontal' then (calcNewPosition MoveDown position, piece) else (position, piece)
+    Minus True -> if horizontal' then (position, piece) else (position, Minus False)
+    Minus False -> if horizontal' then (position, piece) else (position, Minus True)
     _ -> (position, piece)
+  where horizontal' = horizontal dir
 
 step :: Direction -> Board -> Maybe Board
 step dir board = do
   player <- findPlayer board
   let newPosition@(x, _) = calcNewPosition dir player
   guard $ x >= 1 && x <= 10
-  let (Board board') = if dir == MoveUp || dir == MoveDown then stepPieces board else board
+  let (Board board') = stepPieces dir board
       piecesAtNewPosition = board' ! newPosition
   guard $ checkValid piecesAtNewPosition
   return . Board $ board' // [(player, Set.delete Player (board' ! player)), (newPosition, Set.insert Player piecesAtNewPosition)]
