@@ -21,6 +21,8 @@ library
                      , array
                      , astar
                      , unordered-containers
+                     , containers
+                     , cereal
                      , hashable
                      , mtl
   default-language:    Haskell2010
@@ -41,6 +43,7 @@ test-suite impasse-solver-test
                      , impasse-solver
                      , array
                      , unordered-containers
+                     , containers
                      , hashable
                      , hspec
                      , QuickCheck
