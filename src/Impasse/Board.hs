@@ -7,9 +7,8 @@ import qualified Data.Set as Set
 import Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
 import GHC.Generics (Generic)
-import Text.Read (readPrec)
 import Data.Hashable (Hashable)
-import Data.List (groupBy, sortBy, find, foldl')
+import Data.List (groupBy, sortBy, find, foldl', splitAt, intercalate)
 import Data.Graph.AStar (aStar)
 import Data.Ord (comparing)
 import Data.Maybe (fromMaybe, isJust)
@@ -23,6 +22,8 @@ data Piece = Player
            | DownArrow
            | UpHorizontal
            | DownHorizontal
+           | RedX Bool
+           | ReduceCircle
            | Minus Bool
            | Goal
            deriving (Eq, Show, Ord)
@@ -52,6 +53,9 @@ showPiece UpHorizontal = "`"
 showPiece DownHorizontal = "."
 showPiece (Minus False) = "0"
 showPiece (Minus True) = "-"
+showPiece (RedX True) = "x"
+showPiece (RedX False) = "z"
+showPiece ReduceCircle = "*"
 showPiece Goal = "X"
 
 readPiece :: Char -> Piece
@@ -63,6 +67,9 @@ readPiece '`' = UpHorizontal
 readPiece '.' = DownHorizontal
 readPiece '0' = Minus False
 readPiece '-' = Minus True
+readPiece 'x' = RedX True
+readPiece 'z' = RedX False
+readPiece '*' = ReduceCircle
 readPiece 'X' = Goal
 readPiece err = error $ "Unrecognized piece: " ++ [err]
 
@@ -93,6 +100,7 @@ readBoard input = do
   guard $ length rows == 3
   let items = concatMap (map (\x -> if x == ' ' then Set.empty else Set.singleton (readPiece x))) rows
       indices' = sortBy (comparing snd) (range ((1,1), (10,3)))
+  guard $ length items == 30
   return . buildBoard $ zip indices' items
 
 findPlayer :: Board -> Maybe (Int, Int)
@@ -115,15 +123,28 @@ checkValid = all f . Set.toList
                     UpHorizontal -> False
                     DownHorizontal -> False
                     Minus True -> False
+                    RedX True -> False
                     _ -> True
 
-stepPieces :: Direction -> Board -> Board
-stepPieces dir (Board board) = board'
-  where board' = buildBoard assocs'
+stepPieces :: (Int, Int) -> Direction -> Board -> Board
+stepPieces position dir (Board board) = board'
+  where board' = toggleRedXs position $ buildBoard assocs'
         assocs' = concatMap (stepPiecesInPosition dir) (assocs board)
 
 stepPiecesInPosition :: Direction -> PiecesInPosition -> [PiecesInPosition]
 stepPiecesInPosition dir (position, pieces) = map (second Set.singleton . (\x -> stepSinglePiece dir (position, x))) $ Set.toList pieces
+
+toggleRedXs :: (Int, Int) -> Board -> Board
+toggleRedXs newPlayerPos original@(Board board) =
+  if ReduceCircle `Set.member` (board ! newPlayerPos)
+  then buildBoard . map g . assocs . fmap (Set.map f) $ board
+  else original
+  where g (position, pieces) = if position == newPlayerPos
+                               then (position, Set.delete ReduceCircle pieces)
+                               else (position, pieces)
+        f piece = case piece of
+                    RedX x -> RedX (not x)
+                    _ -> piece
 
 horizontal :: Direction -> Bool
 horizontal MoveLeft = True
@@ -147,7 +168,7 @@ step dir board = do
   player <- findPlayer board
   let newPosition@(x, _) = calcNewPosition dir player
   guard $ x >= 1 && x <= 10
-  let (Board board') = stepPieces dir board
+  let (Board board') = stepPieces newPosition dir board
       piecesAtNewPosition = board' ! newPosition
   guard $ checkValid piecesAtNewPosition
   return . Board $ board' // [(player, Set.delete Player (board' ! player)), (newPosition, Set.insert Player piecesAtNewPosition)]
@@ -178,7 +199,14 @@ solve :: Board -> Maybe [Direction]
 solve board = last <$> aStar (validMovesFrom board) dist heur (tryProposedSolution board) []
   where dist _ _ = 1
         heur dirs = let (i, j) = positionFromDirections dirs
-                    in (10 - i)^2 + (2 - j)^2
+                    in abs (10 - i) + abs (2 - j)
+
+splitEvery :: Int -> [a] -> [[a]]
+splitEvery _ [] = []
+splitEvery n xs = as : splitEvery n bs
+  where (as,bs) = splitAt n xs
 
 solveInput :: String -> String
-solveInput = show . (solve <=< readBoard)
+solveInput = render . (solve <=< readBoard)
+  where render (Just xs) = unlines . intercalate [""] . splitEvery 3 $ map show xs
+        render Nothing = "Could not solve!"

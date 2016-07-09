@@ -31,6 +31,11 @@ instance Arbitrary EnemyPiece where
                             , UpArrow
                             , DownArrow
                             , Stationary
+                            , UpHorizontal
+                            , DownHorizontal
+                            , RedX False
+                            , RedX True
+                            , ReduceCircle
                             ]
 
 instance Arbitrary Piece where
@@ -126,6 +131,17 @@ spec = do
       it "changes the pieces according to their behavior" $ do
         step MoveUp simpleBoard `shouldBe` Just simpleBoard2
         step MoveUp simpleBoard2 `shouldBe` Just simpleBoard3
+    let reduceBoard = defaultBoardWith [ ((2,2), Set.singleton ReduceCircle)
+                                       , ((3,2), Set.singleton (RedX True))]
+        reduceBoard2 = defaultBoardWith [ ((1,2), Set.empty)
+                                        , ((2,2), Set.singleton Player)
+                                        , ((3,2), Set.singleton (RedX False))]
+        reduceBoard3 = defaultBoardWith [ ((1,2), Set.empty)
+                                        , ((3,2), Set.fromList [RedX False, Player])
+                                        ]
+    it "causes red X's to become inactive when a 'reduce' circle is hit" $ do
+      step MoveRight reduceBoard `shouldBe` Just reduceBoard2
+      step MoveRight reduceBoard2 `shouldBe` Just reduceBoard3
   describe "isSolved" $ do
     it "returns True in a simple instance" $
       isSolved (defaultBoardWith [((1,2), Set.empty), ((10, 2), Set.fromList [Player, Goal])]) `shouldBe` True
@@ -141,3 +157,7 @@ spec = do
       solve (defaultBoardWith [((2,2), Set.singleton Stationary)]) `shouldSatisfy` isJust
     it "solves a board with the player, the goal, and a moving obstacle" $
       solve (defaultBoardWith [((2,1), Set.singleton DownArrow)]) `shouldSatisfy` isJust
+    it "solves a board with the player, the goal, and a reducible obstacle" $
+      solve (defaultBoardWith [ ((2,2), Set.singleton ReduceCircle)
+                              , ((3,2), Set.singleton (RedX True))
+                              ]) `shouldBe` Just (replicate 9 MoveRight)
