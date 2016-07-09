@@ -3,4 +3,4 @@ module Main where
 import Impasse
 
 main :: IO ()
-main = return ()
+main = interact solveInput

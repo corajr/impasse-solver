@@ -1,13 +1,20 @@
+{-# LANGUAGE DeriveGeneric #-}
 module Impasse.Board where
 
 import Data.Array
 import Data.Set (Set)
 import qualified Data.Set as Set
-import Data.List (groupBy, sortBy, find)
+import Data.HashSet (HashSet)
+import qualified Data.HashSet as HashSet
+import GHC.Generics (Generic)
+import Text.Read (readPrec)
+import Data.Hashable (Hashable)
+import Data.List (groupBy, sortBy, find, foldl')
+import Data.Graph.AStar (aStar)
 import Data.Ord (comparing)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Debug.Trace (traceShowId)
-import Control.Monad (guard, foldM)
+import Control.Monad (guard, foldM, (<=<))
 import Control.Arrow (second)
 
 data Piece = Player
@@ -16,22 +23,15 @@ data Piece = Player
            | DownArrow
            | Minus Bool
            | Goal
-           deriving (Eq, Ord)
-
-instance Show Piece where
-  show Player = "+"
-  show Stationary = "o"
-  show UpArrow = "^"
-  show DownArrow = "v"
-  show (Minus False) = "0"
-  show (Minus True) = "-"
-  show Goal = "X"
+           deriving (Eq, Show, Ord)
 
 data Direction = MoveUp
                | MoveDown
                | MoveLeft
                | MoveRight
-               deriving (Eq, Show)
+               deriving (Eq, Show, Ord, Generic)
+
+instance Hashable Direction
 
 newtype Board = Board { unBoard :: Array (Int, Int) (Set Piece) }
   deriving (Eq)
@@ -40,6 +40,25 @@ instance Show Board where
   show = showBoard
 
 type PiecesInPosition = ((Int, Int), Set Piece)
+
+showPiece :: Piece -> String
+showPiece Player = "+"
+showPiece Stationary = "o"
+showPiece UpArrow = "^"
+showPiece DownArrow = "v"
+showPiece (Minus False) = "0"
+showPiece (Minus True) = "-"
+showPiece Goal = "X"
+
+readPiece :: Char -> Piece
+readPiece '+' = Player
+readPiece 'o' = Stationary
+readPiece '^' = UpArrow
+readPiece 'v' = DownArrow
+readPiece '0' = Minus False
+readPiece '-' = Minus True
+readPiece 'X' = Goal
+readPiece err = error $ "Unrecognized piece: " ++ [err]
 
 buildBoard :: [PiecesInPosition] -> Board
 buildBoard = Board . accum Set.union (array b [(i, z) | i <- range b])
@@ -59,8 +78,16 @@ showBoard (Board board) = unlines $ "":rows'
         rows' = map (concatMap (showPosition . snd)) rows
         showPosition x =
           case Set.maxView x of
-            Just (e', rest) -> if Set.null rest then show e' else "@"
+            Just (e', rest) -> if Set.null rest then showPiece e' else "@"
             Nothing -> " "
+
+readBoard :: String -> Maybe Board
+readBoard input = do
+  let rows = lines input
+  guard $ length rows == 3
+  let items = concatMap (map (\x -> if x == ' ' then Set.empty else Set.singleton (readPiece x))) rows
+      indices' = sortBy (comparing snd) (range ((1,1), (10,3)))
+  return . buildBoard $ zip indices' items
 
 findPlayer :: Board -> Maybe (Int, Int)
 findPlayer = fmap fst . find (Set.member Player . snd) . assocs . unBoard
@@ -120,7 +147,22 @@ tryProposedSolution :: Board -> [Direction] -> Bool
 tryProposedSolution board = maybe False isSolved . foldM f board
   where f acc x = step x acc -- (traceShowId acc)
 
+positionFromDirections :: [Direction] -> (Int, Int)
+positionFromDirections = foldl' (flip calcNewPosition) (1,2)
+
+validMoves :: Board -> [Direction] -> Bool
+validMoves board = isJust . foldM (flip step) board
+
+validMovesFrom :: Board -> [Direction] -> HashSet [Direction]
+validMovesFrom board dirs = HashSet.filter (validMoves board) moves
+  where moves = HashSet.fromList . map ((dirs ++) . (:[])) $ [MoveUp, MoveDown, MoveRight, MoveLeft]
+
 -- | Takes in a starting 'Board' and returns a list of 'Direction's if it can be solved. Otherwise return Nothing.
 solve :: Board -> Maybe [Direction]
-solve board = if tryProposedSolution board proposal then Just proposal else Nothing
-  where proposal = replicate 9 MoveRight
+solve board = last <$> aStar (validMovesFrom board) dist heur (tryProposedSolution board) []
+  where dist _ _ = 1
+        heur dirs = let (i, j) = positionFromDirections dirs
+                    in (10 - i)^2 + (2 - j)^2
+
+solveInput :: String -> String
+solveInput = show . (solve <=< readBoard)

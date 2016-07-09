@@ -1,3 +1,4 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 module Impasse.BoardSpec (main, spec) where
 
 import Test.Hspec
@@ -14,18 +15,30 @@ import Data.Maybe (isJust)
 newtype Position = Position { unPosition :: (Int, Int) }
   deriving (Eq, Show)
 
-newtype PositionPiece = PositionPiece { unPositionPiece :: (Position, Set Piece) }
+newtype EnemyPiece = EnemyPiece { unEnemy :: Piece }
+  deriving (Eq, Show, Ord)
+
+newtype PositionPiece = PositionPiece { unPositionPiece :: (Position, Set EnemyPiece) }
   deriving (Eq, Show)
 
 instance Arbitrary Position where
   arbitrary = (fmap Position . (,)) <$> choose (1, 10) <*> choose (1, 3)
 
+instance Arbitrary EnemyPiece where
+  arbitrary =
+    EnemyPiece <$> elements [ Minus False
+                            , Minus True
+                            , UpArrow
+                            , DownArrow
+                            , Stationary
+                            ]
+
 instance Arbitrary Piece where
-  arbitrary = elements [ Minus False
-                       , UpArrow
-                       , DownArrow
-                       , Stationary
-                       ]
+  arbitrary = oneof [ unEnemy <$> arbitrary
+                    , elements [ Player
+                               , Goal
+                               ]
+                    ]
 
 instance Arbitrary PositionPiece where
   arbitrary = (fmap PositionPiece . (,)) <$> arbitrary <*> arbitrary
@@ -37,7 +50,8 @@ instance Arbitrary Board where
     let player = (playerPos, Set.singleton Player)
         goal = (goalPos, Set.singleton Goal)
     rest <- arbitrary
-    return . buildBoard $ player:goal:map (first unPosition . unPositionPiece) rest
+    let rest' = map ((\(Position p, enemies) -> (p, Set.map unEnemy enemies)) . unPositionPiece) rest
+    return . buildBoard $ player:goal:rest'
 
 defaultBoardWith :: [((Int, Int), Set Piece)] -> Board
 defaultBoardWith xs = Board (unBoard defaultBoard // xs)
@@ -49,6 +63,9 @@ main = hspec spec
 
 spec :: Spec
 spec = do
+  describe "readPiece" $
+    it "read . show == id" $ property $
+      \(p :: Piece) -> (readPiece . head . showPiece) p === p
   describe "defaultBoard" $
     it "represents a 10x3 board" $
       bounds (unBoard defaultBoard) `shouldBe` ((1,1), (10, 3))
@@ -59,6 +76,12 @@ spec = do
                                                 , "+        X"
                                                 , "          "
                                                 ]
+  describe "readBoard" $
+    it "reads in a board from a string" $
+      readBoard (unlines [ "          "
+                         , "+        X"
+                         , "          "
+                         ]) `shouldBe` Just defaultBoard
   describe "findPlayer" $
     it "returns the location of the player" $
       findPlayer defaultBoard `shouldBe` Just (1,2)
