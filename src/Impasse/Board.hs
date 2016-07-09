@@ -57,7 +57,12 @@ instance Show Board where
   show = showBoard
 
 newtype BoardWithMoves = BoardWithMoves { unBoardWithMoves :: (Board, [Direction]) }
-  deriving (Eq, Ord, Generic)
+
+instance Eq BoardWithMoves where
+  (BoardWithMoves (a, _)) == (BoardWithMoves (b, _)) = a == b
+
+instance Ord BoardWithMoves where
+  compare (BoardWithMoves (a, _)) (BoardWithMoves (b, _)) = compare a b
 
 instance Hashable BoardWithMoves where
   hashWithSalt = hashUsing (fst . unBoardWithMoves)
