@@ -1,5 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
-module Impasse.BoardSpec (main, spec) where
+module Impasse.BoardSpec (main, spec, defaultBoardWith) where
 
 import Test.Hspec
 import Test.QuickCheck
@@ -9,7 +9,6 @@ import Impasse.Board
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Array (bounds, (//), elems)
-import Data.Maybe (isJust)
 
 newtype Position = Position (Int, Int)
   deriving (Eq, Show)
@@ -148,18 +147,3 @@ spec = do
       \board -> let elems' = elems $ unBoard board
                     playerAndGoalTogether = any (\x -> Player `Set.member` x && Goal `Set.member` x) elems'
                 in isSolved board === playerAndGoalTogether
-  describe "solve" $ do
-    it "solves the default board with just the player and the goal" $
-      solve defaultBoard `shouldBe` Just (replicate 9 MoveRight)
-    it "solves a board with the player, the goal, and a stationary obstacle" $
-      solve (defaultBoardWith [((2,2), Set.singleton Stationary)]) `shouldSatisfy` isJust
-    it "solves a board with the player, the goal, and a moving obstacle" $
-      solve (defaultBoardWith [((2,1), Set.singleton DownArrow)]) `shouldSatisfy` isJust
-    it "solves a board with the player, the goal, and a reducible obstacle" $
-      solve (defaultBoardWith [ ((2,2), Set.singleton ReduceCircle)
-                              , ((3,2), Set.singleton (RedX True))
-                              ]) `shouldBe` Just (replicate 9 MoveRight)
-    it "solves a board with the player, the goal, and a distant reducible obstacle" $
-      solve (defaultBoardWith [ ((1,1), Set.singleton ReduceCircle)
-                              , ((9,2), Set.singleton (RedX True))
-                              ]) `shouldSatisfy` isJust

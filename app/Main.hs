@@ -1,6 +1,6 @@
 module Main where
 
-import Impasse
+import Impasse.Solve
 
 main :: IO ()
 main = interact solveInput
