@@ -2,19 +2,17 @@
 module Impasse.Board where
 
 import Data.Array
-import Data.Set (Set)
-import qualified Data.Set as Set
 import Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
 import GHC.Generics (Generic)
-import Data.Hashable (Hashable)
+import Data.Hashable (Hashable, hashWithSalt)
 import Data.List (groupBy, sortBy, find, foldl', splitAt, intercalate)
 import Data.Graph.AStar (aStar)
 import Data.Ord (comparing)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Debug.Trace (traceShowId)
 import Control.Monad (guard, foldM, (<=<))
-import Control.Arrow (second)
+import Control.Arrow (second, (&&&))
 
 data Piece = Player
            | Stationary
@@ -26,7 +24,9 @@ data Piece = Player
            | ReduceCircle
            | Minus Bool
            | Goal
-           deriving (Eq, Show, Ord)
+           deriving (Eq, Show, Ord, Generic)
+
+instance Hashable Piece
 
 data Direction = MoveUp
                | MoveDown
@@ -36,13 +36,16 @@ data Direction = MoveUp
 
 instance Hashable Direction
 
-newtype Board = Board { unBoard :: Array (Int, Int) (Set Piece) }
-  deriving (Eq)
+newtype Board = Board { unBoard :: Array (Int, Int) (HashSet Piece) }
+  deriving (Eq, Generic)
+
+instance Hashable Board where
+  hashWithSalt salt = hashWithSalt salt . assocs . unBoard
 
 instance Show Board where
   show = showBoard
 
-type PiecesInPosition = ((Int, Int), Set Piece)
+type PiecesInPosition = ((Int, Int), HashSet Piece)
 
 showPiece :: Piece -> String
 showPiece Player = "+"
@@ -74,15 +77,20 @@ readPiece 'X' = Goal
 readPiece err = error $ "Unrecognized piece: " ++ [err]
 
 buildBoard :: [PiecesInPosition] -> Board
-buildBoard = Board . accum Set.union (array b [(i, z) | i <- range b])
+buildBoard = Board . accum HashSet.union (array b [(i, z) | i <- range b])
   where b = ((1,1), (10,3))
-        z = Set.empty
--- accumArray Set.union Set.empty ((1,1), (10, 3))
+        z = HashSet.empty
+-- accumArray HashSet.union HashSet.empty ((1,1), (10, 3))
 
 defaultBoard :: Board
-defaultBoard = buildBoard [ ((1, 2), Set.singleton Player)
-                          , ((10, 2), Set.singleton Goal)
+defaultBoard = buildBoard [ ((1, 2), HashSet.singleton Player)
+                          , ((10, 2), HashSet.singleton Goal)
                           ]
+
+setView :: (Eq a, Hashable a) => HashSet a -> Maybe (a, HashSet a)
+setView hs
+  | HashSet.null hs = Nothing
+  | otherwise = fmap (id &&& (`HashSet.delete` hs)) . listToMaybe . HashSet.toList $ hs
 
 showBoard :: Board -> String
 showBoard (Board board) = unlines $ "":rows'
@@ -90,21 +98,21 @@ showBoard (Board board) = unlines $ "":rows'
         rows = groupBy (\a b -> comparing (snd . fst) a b == EQ) . sortBy (comparing (snd . fst)) $ items
         rows' = map (concatMap (showPosition . snd)) rows
         showPosition x =
-          case Set.maxView x of
-            Just (e', rest) -> if Set.null rest then showPiece e' else "@"
+          case setView x of
+            Just (e', rest) -> if HashSet.null rest then showPiece e' else "@"
             Nothing -> " "
 
 readBoard :: String -> Maybe Board
 readBoard input = do
   let rows = lines input
   guard $ length rows == 3
-  let items = concatMap (map (\x -> if x == ' ' then Set.empty else Set.singleton (readPiece x))) rows
+  let items = concatMap (map (\x -> if x == ' ' then HashSet.empty else HashSet.singleton (readPiece x))) rows
       indices' = sortBy (comparing snd) (range ((1,1), (10,3)))
   guard $ length items == 30
   return . buildBoard $ zip indices' items
 
 findPlayer :: Board -> Maybe (Int, Int)
-findPlayer = fmap fst . find (Set.member Player . snd) . assocs . unBoard
+findPlayer = fmap fst . find (HashSet.member Player . snd) . assocs . unBoard
 
 calcNewPosition :: Direction -> (Int, Int) -> (Int, Int)
 calcNewPosition dir (x, y) = (x + offsetX, ((y - 1 + offsetY) `mod` 3) + 1)
@@ -114,8 +122,8 @@ calcNewPosition dir (x, y) = (x + offsetX, ((y - 1 + offsetY) `mod` 3) + 1)
                                MoveLeft -> (-1,0)
                                MoveRight -> (1,0)
 
-checkValid :: Set Piece -> Bool
-checkValid = all f . Set.toList
+checkValid :: HashSet Piece -> Bool
+checkValid = all f . HashSet.toList
   where f piece = case piece of
                     Stationary -> False
                     UpArrow -> False
@@ -132,15 +140,15 @@ stepPieces position dir (Board board) = board'
         assocs' = concatMap (stepPiecesInPosition dir) (assocs board)
 
 stepPiecesInPosition :: Direction -> PiecesInPosition -> [PiecesInPosition]
-stepPiecesInPosition dir (position, pieces) = map (second Set.singleton . (\x -> stepSinglePiece dir (position, x))) $ Set.toList pieces
+stepPiecesInPosition dir (position, pieces) = map (second HashSet.singleton . (\x -> stepSinglePiece dir (position, x))) $ HashSet.toList pieces
 
 toggleRedXs :: (Int, Int) -> Board -> Board
 toggleRedXs newPlayerPos original@(Board board) =
-  if ReduceCircle `Set.member` (board ! newPlayerPos)
-  then buildBoard . map g . assocs . fmap (Set.map f) $ board
+  if ReduceCircle `HashSet.member` (board ! newPlayerPos)
+  then buildBoard . map g . assocs . fmap (HashSet.map f) $ board
   else original
   where g (position, pieces) = if position == newPlayerPos
-                               then (position, Set.delete ReduceCircle pieces)
+                               then (position, HashSet.delete ReduceCircle pieces)
                                else (position, pieces)
         f piece = case piece of
                     RedX x -> RedX (not x)
@@ -171,18 +179,17 @@ step dir board = do
   let (Board board') = stepPieces newPosition dir board
       piecesAtNewPosition = board' ! newPosition
   guard $ checkValid piecesAtNewPosition
-  return . Board $ board' // [(player, Set.delete Player (board' ! player)), (newPosition, Set.insert Player piecesAtNewPosition)]
+  return . Board $ board' // [(player, HashSet.delete Player (board' ! player)), (newPosition, HashSet.insert Player piecesAtNewPosition)]
 
 -- | Are the player and the goal in the same place?
 isSolved :: Board -> Bool
 isSolved board = fromMaybe False $ do
   player <- findPlayer board
   let piecesAtPlace = unBoard board ! player
-  return $ Goal `Set.member` piecesAtPlace
+  return $ Goal `HashSet.member` piecesAtPlace
 
 tryProposedSolution :: Board -> [Direction] -> Bool
-tryProposedSolution board = maybe False isSolved . foldM f board
-  where f acc x = step x acc -- (traceShowId acc)
+tryProposedSolution board = maybe False isSolved . foldM (flip step) board
 
 positionFromDirections :: [Direction] -> (Int, Int)
 positionFromDirections = foldl' (flip calcNewPosition) (1,2)
@@ -194,12 +201,15 @@ validMovesFrom :: Board -> [Direction] -> HashSet [Direction]
 validMovesFrom board dirs = HashSet.filter (validMoves board) moves
   where moves = HashSet.fromList . map ((dirs ++) . (:[])) $ [MoveUp, MoveDown, MoveRight, MoveLeft]
 
+heuristic :: [Direction] -> Int
+heuristic dirs = distTo (10, 2)
+  where (i, j) = positionFromDirections dirs
+        distTo (x, y) = abs (x - i) + abs (y - j)
+
 -- | Takes in a starting 'Board' and returns a list of 'Direction's if it can be solved. Otherwise return Nothing.
 solve :: Board -> Maybe [Direction]
-solve board = last <$> aStar (validMovesFrom board) dist heur (tryProposedSolution board) []
+solve board = last <$> aStar (validMovesFrom board) dist heuristic (tryProposedSolution board) []
   where dist _ _ = 1
-        heur dirs = let (i, j) = positionFromDirections dirs
-                    in abs (10 - i) + abs (2 - j)
 
 splitEvery :: Int -> [a] -> [[a]]
 splitEvery _ [] = []

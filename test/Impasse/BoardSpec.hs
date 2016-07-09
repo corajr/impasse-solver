@@ -1,4 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE DeriveGeneric #-}
 module Impasse.BoardSpec (main, spec) where
 
 import Test.Hspec
@@ -6,9 +7,11 @@ import Test.QuickCheck
 
 import Impasse.Board
 
+import GHC.Generics (Generic)
+import Data.Hashable (Hashable)
 import Control.Arrow (first)
-import Data.Set (Set)
-import qualified Data.Set as Set
+import Data.HashSet (HashSet)
+import qualified Data.HashSet as HashSet
 import Data.Array (bounds, (//), elems)
 import Data.Maybe (isJust)
 
@@ -16,9 +19,11 @@ newtype Position = Position { unPosition :: (Int, Int) }
   deriving (Eq, Show)
 
 newtype EnemyPiece = EnemyPiece { unEnemy :: Piece }
-  deriving (Eq, Show, Ord)
+  deriving (Eq, Show, Generic)
 
-newtype PositionPiece = PositionPiece { unPositionPiece :: (Position, Set EnemyPiece) }
+instance Hashable EnemyPiece
+
+newtype PositionPiece = PositionPiece { unPositionPiece :: (Position, HashSet EnemyPiece) }
   deriving (Eq, Show)
 
 instance Arbitrary Position where
@@ -46,19 +51,19 @@ instance Arbitrary Piece where
                     ]
 
 instance Arbitrary PositionPiece where
-  arbitrary = (fmap PositionPiece . (,)) <$> arbitrary <*> arbitrary
+  arbitrary = (fmap PositionPiece . (,)) <$> arbitrary <*> fmap HashSet.fromList arbitrary
 
 instance Arbitrary Board where
   arbitrary = do
     (Position playerPos) <- arbitrary
     (Position goalPos) <- arbitrary
-    let player = (playerPos, Set.singleton Player)
-        goal = (goalPos, Set.singleton Goal)
+    let player = (playerPos, HashSet.singleton Player)
+        goal = (goalPos, HashSet.singleton Goal)
     rest <- arbitrary
-    let rest' = map ((\(Position p, enemies) -> (p, Set.map unEnemy enemies)) . unPositionPiece) rest
+    let rest' = map ((\(Position p, enemies) -> (p, HashSet.map unEnemy enemies)) . unPositionPiece) rest
     return . buildBoard $ player:goal:rest'
 
-defaultBoardWith :: [((Int, Int), Set Piece)] -> Board
+defaultBoardWith :: [((Int, Int), HashSet Piece)] -> Board
 defaultBoardWith xs = Board (unBoard defaultBoard // xs)
 
 -- `main` is here so that this module can be run from GHCi on its own.  It is
@@ -99,65 +104,68 @@ spec = do
       calcNewPosition MoveDown (5,3) `shouldBe` (5,1)
   describe "step" $ do
     it "returns a new board where the player moves by 1 space" $ do
-      step MoveUp defaultBoard `shouldBe` Just (defaultBoardWith [((1,2), Set.empty), ((1,1), Set.singleton Player)])
-      step MoveDown defaultBoard `shouldBe` Just (defaultBoardWith [((1,2), Set.empty), ((1,3), Set.singleton Player)])
-      step MoveRight defaultBoard `shouldBe` Just (defaultBoardWith [((1,2), Set.empty), ((2,2), Set.singleton Player)])
+      step MoveUp defaultBoard `shouldBe` Just (defaultBoardWith [((1,2), HashSet.empty), ((1,1), HashSet.singleton Player)])
+      step MoveDown defaultBoard `shouldBe` Just (defaultBoardWith [((1,2), HashSet.empty), ((1,3), HashSet.singleton Player)])
+      step MoveRight defaultBoard `shouldBe` Just (defaultBoardWith [((1,2), HashSet.empty), ((2,2), HashSet.singleton Player)])
     it "returns Nothing if the move goes off the left edge" $ do
       step MoveLeft defaultBoard `shouldBe` Nothing
-      step MoveLeft (defaultBoardWith [((1,2), Set.empty), ((1,1), Set.singleton Player)]) `shouldBe` Nothing
-      step MoveLeft (defaultBoardWith [((1,2), Set.empty), ((1,3), Set.singleton Player)]) `shouldBe` Nothing
+      step MoveLeft (defaultBoardWith [((1,2), HashSet.empty), ((1,1), HashSet.singleton Player)]) `shouldBe` Nothing
+      step MoveLeft (defaultBoardWith [((1,2), HashSet.empty), ((1,3), HashSet.singleton Player)]) `shouldBe` Nothing
     it "returns Nothing if the move puts the player with another piece" $
-      step MoveRight (defaultBoardWith [((2,2), Set.singleton Stationary)]) `shouldBe` Nothing
+      step MoveRight (defaultBoardWith [((2,2), HashSet.singleton Stationary)]) `shouldBe` Nothing
     context "with a row of pieces" $ do
-      let simpleBoard = defaultBoardWith [ ((2,2), Set.singleton Stationary)
-                                         , ((3,2), Set.singleton (Minus False))
-                                         , ((4,2), Set.singleton UpArrow)
-                                         , ((5,2), Set.singleton DownArrow)
+      let simpleBoard = defaultBoardWith [ ((2,2), HashSet.singleton Stationary)
+                                         , ((3,2), HashSet.singleton (Minus False))
+                                         , ((4,2), HashSet.singleton UpArrow)
+                                         , ((5,2), HashSet.singleton DownArrow)
                                          ]
-          simpleBoard2 = defaultBoardWith [ ((1,1), Set.singleton Player)
-                                          , ((1,2), Set.empty)
-                                          , ((2,2), Set.singleton Stationary)
-                                          , ((3,2), Set.singleton (Minus True))
-                                          , ((4,1), Set.singleton UpArrow)
-                                          , ((5,3), Set.singleton DownArrow)
+          simpleBoard2 = defaultBoardWith [ ((1,1), HashSet.singleton Player)
+                                          , ((1,2), HashSet.empty)
+                                          , ((2,2), HashSet.singleton Stationary)
+                                          , ((3,2), HashSet.singleton (Minus True))
+                                          , ((4,1), HashSet.singleton UpArrow)
+                                          , ((5,3), HashSet.singleton DownArrow)
                                           ]
-          simpleBoard3 = defaultBoardWith [ ((1,3), Set.singleton Player)
-                                          , ((1,2), Set.empty)
-                                          , ((2,2), Set.singleton Stationary)
-                                          , ((3,2), Set.singleton (Minus False))
-                                          , ((4,3), Set.singleton UpArrow)
-                                          , ((5,1), Set.singleton DownArrow)
+          simpleBoard3 = defaultBoardWith [ ((1,3), HashSet.singleton Player)
+                                          , ((1,2), HashSet.empty)
+                                          , ((2,2), HashSet.singleton Stationary)
+                                          , ((3,2), HashSet.singleton (Minus False))
+                                          , ((4,3), HashSet.singleton UpArrow)
+                                          , ((5,1), HashSet.singleton DownArrow)
                                           ]
       it "changes the pieces according to their behavior" $ do
         step MoveUp simpleBoard `shouldBe` Just simpleBoard2
         step MoveUp simpleBoard2 `shouldBe` Just simpleBoard3
-    let reduceBoard = defaultBoardWith [ ((2,2), Set.singleton ReduceCircle)
-                                       , ((3,2), Set.singleton (RedX True))]
-        reduceBoard2 = defaultBoardWith [ ((1,2), Set.empty)
-                                        , ((2,2), Set.singleton Player)
-                                        , ((3,2), Set.singleton (RedX False))]
-        reduceBoard3 = defaultBoardWith [ ((1,2), Set.empty)
-                                        , ((3,2), Set.fromList [RedX False, Player])
+    let reduceBoard = defaultBoardWith [ ((2,2), HashSet.singleton ReduceCircle)
+                                       , ((3,2), HashSet.singleton (RedX True))]
+        reduceBoard2 = defaultBoardWith [ ((1,2), HashSet.empty)
+                                        , ((2,2), HashSet.singleton Player)
+                                        , ((3,2), HashSet.singleton (RedX False))]
+        reduceBoard3 = defaultBoardWith [ ((1,2), HashSet.empty)
+                                        , ((3,2), HashSet.fromList [RedX False, Player])
                                         ]
     it "causes red X's to become inactive when a 'reduce' circle is hit" $ do
       step MoveRight reduceBoard `shouldBe` Just reduceBoard2
       step MoveRight reduceBoard2 `shouldBe` Just reduceBoard3
   describe "isSolved" $ do
     it "returns True in a simple instance" $
-      isSolved (defaultBoardWith [((1,2), Set.empty), ((10, 2), Set.fromList [Player, Goal])]) `shouldBe` True
+      isSolved (defaultBoardWith [((1,2), HashSet.empty), ((10, 2), HashSet.fromList [Player, Goal])]) `shouldBe` True
     it "returns True iff the player and goal are in the same location" $ property $
       \board -> let elems' = elems $ unBoard board
-                    playerAndGoal = Set.fromList [Player, Goal]
-                    playerAndGoalTogether = any (playerAndGoal `Set.isSubsetOf`) elems'
+                    playerAndGoalTogether = any (\x -> Player `HashSet.member` x && Goal `HashSet.member` x) elems'
                 in isSolved board === playerAndGoalTogether
   describe "solve" $ do
     it "solves the default board with just the player and the goal" $
       solve defaultBoard `shouldBe` Just (replicate 9 MoveRight)
     it "solves a board with the player, the goal, and a stationary obstacle" $
-      solve (defaultBoardWith [((2,2), Set.singleton Stationary)]) `shouldSatisfy` isJust
+      solve (defaultBoardWith [((2,2), HashSet.singleton Stationary)]) `shouldSatisfy` isJust
     it "solves a board with the player, the goal, and a moving obstacle" $
-      solve (defaultBoardWith [((2,1), Set.singleton DownArrow)]) `shouldSatisfy` isJust
+      solve (defaultBoardWith [((2,1), HashSet.singleton DownArrow)]) `shouldSatisfy` isJust
     it "solves a board with the player, the goal, and a reducible obstacle" $
-      solve (defaultBoardWith [ ((2,2), Set.singleton ReduceCircle)
-                              , ((3,2), Set.singleton (RedX True))
+      solve (defaultBoardWith [ ((2,2), HashSet.singleton ReduceCircle)
+                              , ((3,2), HashSet.singleton (RedX True))
                               ]) `shouldBe` Just (replicate 9 MoveRight)
+    it "solves a board with the player, the goal, and a distant reducible obstacle" $
+      solve (defaultBoardWith [ ((1,1), HashSet.singleton ReduceCircle)
+                              , ((9,2), HashSet.singleton (RedX True))
+                              ]) `shouldSatisfy` isJust
