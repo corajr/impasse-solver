@@ -1,15 +1,16 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE FlexibleInstances #-}
 module Impasse.Board where
 
 import Data.Array
 import Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
 import GHC.Generics (Generic)
-import Data.Hashable (Hashable, hashWithSalt)
+import Data.Hashable (Hashable, hashWithSalt, hashUsing)
 import Data.List (groupBy, sortBy, find, foldl', splitAt, intercalate)
 import Data.Graph.AStar (aStar)
 import Data.Ord (comparing)
-import Data.Maybe (fromMaybe, isJust, listToMaybe)
+import Data.Maybe (fromMaybe, isJust, listToMaybe, mapMaybe)
 import Debug.Trace (traceShowId)
 import Control.Monad (guard, foldM, (<=<))
 import Control.Arrow (second, (&&&))
@@ -39,11 +40,23 @@ instance Hashable Direction
 newtype Board = Board { unBoard :: Array (Int, Int) (HashSet Piece) }
   deriving (Eq, Generic)
 
+instance Ord (HashSet Piece) where
+  compare = comparing HashSet.toList
+
+instance Ord Board where
+  compare = comparing (assocs . unBoard)
+
 instance Hashable Board where
-  hashWithSalt salt = hashWithSalt salt . assocs . unBoard
+  hashWithSalt = hashUsing (assocs . unBoard)
 
 instance Show Board where
   show = showBoard
+
+newtype BoardWithMoves = BoardWithMoves { unBoardWithMoves :: (Board, [Direction]) }
+  deriving (Eq, Ord, Generic)
+
+instance Hashable BoardWithMoves where
+  hashWithSalt = hashUsing (fst . unBoardWithMoves)
 
 type PiecesInPosition = ((Int, Int), HashSet Piece)
 
@@ -188,27 +201,29 @@ isSolved board = fromMaybe False $ do
   let piecesAtPlace = unBoard board ! player
   return $ Goal `HashSet.member` piecesAtPlace
 
-tryProposedSolution :: Board -> [Direction] -> Bool
-tryProposedSolution board = maybe False isSolved . foldM (flip step) board
+tryProposedSolution :: BoardWithMoves -> Bool
+tryProposedSolution (BoardWithMoves (board, _)) = isSolved board
 
 positionFromDirections :: [Direction] -> (Int, Int)
 positionFromDirections = foldl' (flip calcNewPosition) (1,2)
 
-validMoves :: Board -> [Direction] -> Bool
-validMoves board = isJust . foldM (flip step) board
+validMove :: BoardWithMoves -> Direction -> Maybe BoardWithMoves
+validMove (BoardWithMoves (board, dirs)) newDir = do
+  nextBoard <- step newDir board
+  return $ BoardWithMoves (nextBoard, dirs ++ [newDir])
 
-validMovesFrom :: Board -> [Direction] -> HashSet [Direction]
-validMovesFrom board dirs = HashSet.filter (validMoves board) moves
-  where moves = HashSet.fromList . map ((dirs ++) . (:[])) $ [MoveUp, MoveDown, MoveRight, MoveLeft]
+validMovesFrom :: BoardWithMoves -> HashSet BoardWithMoves
+validMovesFrom board = HashSet.fromList moves
+  where moves = mapMaybe (validMove board) [MoveUp, MoveDown, MoveRight, MoveLeft]
 
-heuristic :: [Direction] -> Int
-heuristic dirs = distTo (10, 2)
+heuristic :: BoardWithMoves -> Int
+heuristic (BoardWithMoves (_, dirs)) = distTo (10, 2)
   where (i, j) = positionFromDirections dirs
         distTo (x, y) = abs (x - i) + abs (y - j)
 
 -- | Takes in a starting 'Board' and returns a list of 'Direction's if it can be solved. Otherwise return Nothing.
 solve :: Board -> Maybe [Direction]
-solve board = last <$> aStar (validMovesFrom board) dist heuristic (tryProposedSolution board) []
+solve board = (snd . unBoardWithMoves . last) <$> aStar validMovesFrom dist heuristic tryProposedSolution (BoardWithMoves (board, []))
   where dist _ _ = 1
 
 splitEvery :: Int -> [a] -> [[a]]
